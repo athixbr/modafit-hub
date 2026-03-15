@@ -1,17 +1,130 @@
-import { useState } from 'react';
-import { mockProducts } from '@/data/mockData';
-import { Product } from '@/types';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Search, Edit, Trash2, X, Package } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Package, UploadCloud, TrendingUp, Settings, ImageIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import { 
+  getProducts, createProduct, updateProduct, deleteProduct,
+  getCategories, getSizes, getColors,
+  createCategory, createSize, createColor,
+  deleteCategory, deleteSize, deleteColor,
+  updateCategory, updateSize, updateColor,
+  uploadFile, createStockEntry
+} from '@/lib/api';
+
+interface Product {
+  id: string;
+  name: string;
+  description?: string;
+  category: string;
+  size?: string[];
+  color?: string;
+  price: number;
+  costPrice: number;
+  quantity: number;
+  minStock: number;
+  sku: string;
+  image?: string;
+  images?: string[];
+  active: boolean;
+}
+
+interface Category {
+  id: string;
+  name: string;
+  description?: string;
+  active?: boolean;
+}
+
+interface Size {
+  id: string;
+  name: string;
+  order: number;
+  active?: boolean;
+}
+
+interface Color {
+  id: string;
+  name: string;
+  hexCode?: string;
+  active?: boolean;
+}
+
+interface InvoiceItem {
+  code?: string;
+  ean?: string;
+  description?: string;
+  ncm?: string;
+  cfop?: string;
+  unit?: string;
+  quantity?: string;
+  unitPrice?: string;
+  total?: string;
+}
 
 export default function StockPage() {
-  const [products, setProducts] = useState<Product[]>(mockProducts);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [sizes, setSizes] = useState<Size[]>([]);
+  const [colors, setColors] = useState<Color[]>([]);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [showXmlImport, setShowXmlImport] = useState(false);
+  const [showAttributes, setShowAttributes] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [parsedItems, setParsedItems] = useState<InvoiceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string>('');
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const { toast } = useToast();
+  
+  // Refs
+  const xmlInputRef = useRef<HTMLInputElement>(null);
+
+  // Carregar dados iniciais
+  useEffect(() => {
+    loadProducts();
+    loadAttributes();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadProducts = async () => {
+    try {
+      setLoading(true);
+      const response = await getProducts();
+      if (response.success) {
+        setProducts((response.data as Product[]) || []);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar produtos:', error);
+      toast({
+        title: 'Erro',
+        description: 'Não foi possível carregar os produtos',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAttributes = async () => {
+    try {
+      const [categoriesRes, sizesRes, colorsRes] = await Promise.all([
+        getCategories(),
+        getSizes(),
+        getColors()
+      ]);
+
+      if (categoriesRes.success) setCategories((categoriesRes.data as Category[]) || []);
+      if (sizesRes.success) setSizes((sizesRes.data as Size[]) || []);
+      if (colorsRes.success) setColors((colorsRes.data as Color[]) || []);
+    } catch (error) {
+      console.error('Erro ao carregar atributos:', error);
+    }
+  };
 
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -19,38 +132,211 @@ export default function StockPage() {
     p.category.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleDelete = (id: string) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedImage(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
-  const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleDelete = async (id: string) => {
+    if (!confirm('Deseja realmente deletar este produto?')) return;
+
+    try {
+      const response = await deleteProduct(id);
+      if (response.success) {
+        toast({
+          title: 'Sucesso',
+          description: 'Produto deletado',
+          className: 'bg-green-600 text-white border-0'
+        });
+        loadProducts();
+      }
+    } catch (error) {
+      toast({
+        title: 'Erro',
+        description: error instanceof Error ? error.message : 'Erro ao deletar produto',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const product: Product = {
-      id: editingProduct?.id || Date.now().toString(),
-      name: form.get('name') as string,
-      description: form.get('description') as string,
-      category: form.get('category') as string,
-      size: (form.get('sizes') as string).split(',').map(s => s.trim()),
-      color: form.get('color') as string,
-      price: parseFloat(form.get('price') as string),
-      costPrice: parseFloat(form.get('costPrice') as string),
-      quantity: parseInt(form.get('quantity') as string),
-      minStock: parseInt(form.get('minStock') as string),
-      sku: form.get('sku') as string,
-      image: form.get('image') as string || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400',
-      images: [],
-      active: true,
-      createdAt: editingProduct?.createdAt || new Date().toISOString().split('T')[0],
-    };
-    if (editingProduct) {
-      setProducts(prev => prev.map(p => p.id === editingProduct.id ? product : p));
-    } else {
-      setProducts(prev => [...prev, product]);
+    
+    try {
+      // Upload da imagem se houver
+      let imageUrl = editingProduct?.image || '';
+      if (selectedImage) {
+        setUploadingImage(true);
+        const uploadResponse = await uploadFile(selectedImage, 'products');
+        if (uploadResponse.success) {
+          imageUrl = uploadResponse.url;
+        }
+        setUploadingImage(false);
+      }
+
+      // Selecionar tamanhos marcados
+      const selectedSizes: string[] = [];
+      sizes.forEach(size => {
+        if (form.get(`size_${size.id}`) === 'on') {
+          selectedSizes.push(size.name);
+        }
+      });
+
+      const productData = {
+        name: form.get('name') as string,
+        description: form.get('description') as string,
+        category: form.get('category') as string,
+        size: selectedSizes,
+        color: form.get('color') as string,
+        price: parseFloat(form.get('price') as string),
+        costPrice: parseFloat(form.get('costPrice') as string),
+        quantity: parseInt(form.get('quantity') as string),
+        minStock: parseInt(form.get('minStock') as string),
+        sku: form.get('sku') as string,
+        image: imageUrl,
+        active: true
+      };
+
+      const response = editingProduct 
+        ? await updateProduct(editingProduct.id, productData)
+        : await createProduct(productData);
+
+      if (response.success) {
+        toast({
+          title: 'Sucesso',
+          description: response.message,
+          className: 'bg-green-600 text-white border-0'
+        });
+        setShowForm(false);
+        setEditingProduct(null);
+        setImagePreview('');
+        setSelectedImage(null);
+        loadProducts();
+      }
+    } catch (error) {
+      toast({
+        title: 'Erro',
+        description: error instanceof Error ? error.message : 'Erro ao salvar produto',
+        variant: 'destructive'
+      });
     }
-    setShowForm(false);
-    setEditingProduct(null);
   };
+
+  const parseXml = (xmlText: string): InvoiceItem[] => {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlText, 'application/xml');
+      const dets = Array.from(doc.getElementsByTagNameNS('*', 'det'));
+      if (dets.length === 0) {
+        const dets2 = Array.from(doc.getElementsByTagName('det'));
+        return dets2.map(det => extractFromDet(det));
+      }
+      return dets.map(det => extractFromDet(det));
+    } catch (err) {
+      console.error('XML parse error', err);
+      return [];
+    }
+  };
+
+  const extractFromDet = (det: Element): InvoiceItem => {
+    const prod = Array.from(det.children).find(c => c.localName === 'prod');
+    if (!prod) return {};
+    const get = (name: string) => {
+      const el = prod.querySelector(name) || prod.querySelector(`[local-name()="${name}"]` as string);
+      if (el) return el.textContent || undefined;
+      const found = Array.from(prod.children).find(c => c.localName?.toLowerCase() === name.toLowerCase());
+      return found?.textContent || undefined;
+    };
+
+    return {
+      code: get('cProd'),
+      ean: get('cEAN'),
+      description: get('xProd'),
+      ncm: get('NCM'),
+      cfop: get('CFOP'),
+      unit: get('uCom'),
+      quantity: get('qCom'),
+      unitPrice: get('vUnCom'),
+      total: get('vProd')
+    };
+  };
+
+  const handleXmlFile = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result as string;
+      const items = parseXml(text);
+      setParsedItems(items);
+      toast({ title: 'Arquivo lido', description: `${items.length} itens encontrados` });
+    };
+    reader.onerror = () => {
+      toast({ title: 'Erro', description: 'Não foi possível ler o arquivo', variant: 'destructive' });
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  const handleImportEntry = async () => {
+    if (parsedItems.length === 0) {
+      toast({ title: 'Nada para importar', description: 'Carregue um XML primeiro', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const entries = parsedItems.map(item => ({
+        productCode: item.code,
+        productEan: item.ean,
+        productDescription: item.description,
+        productNcm: item.ncm,
+        productCfop: item.cfop,
+        productUnit: item.unit,
+        quantity: parseInt(item.quantity || '0'),
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        totalPrice: parseFloat(item.total || '0')
+      }));
+
+      const response = await createStockEntry({
+        items: entries,
+        notes: 'Importação via XML NF-e'
+      });
+
+      if (response.success) {
+        toast({
+          title: 'Sucesso',
+          description: response.message,
+          className: 'bg-green-600 text-white border-0'
+        });
+        setParsedItems([]);
+        setShowXmlImport(false);
+        loadProducts();
+      }
+    } catch (error) {
+      toast({
+        title: 'Erro',
+        description: error instanceof Error ? error.message : 'Erro ao importar entradas',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="w-12 h-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Carregando estoque...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -59,9 +345,17 @@ export default function StockPage() {
           <h1 className="text-2xl font-bold font-display text-foreground">Estoque</h1>
           <p className="text-muted-foreground">{products.length} produtos cadastrados</p>
         </div>
-        <Button onClick={() => { setEditingProduct(null); setShowForm(true); }} className="gradient-primary text-primary-foreground gap-2">
-          <Plus className="h-4 w-4" /> Novo Produto
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowAttributes(true)} variant="outline" className="gap-2">
+            <Settings className="h-4 w-4" /> Gerenciar Atributos
+          </Button>
+          <Button onClick={() => setShowXmlImport(true)} variant="outline" className="gap-2">
+            <TrendingUp className="h-4 w-4" /> Entrada (XML)
+          </Button>
+          <Button onClick={() => { setEditingProduct(null); setImagePreview(''); setSelectedImage(null); setShowForm(true); }} className="gradient-primary text-primary-foreground gap-2">
+            <Plus className="h-4 w-4" /> Novo Produto
+          </Button>
+        </div>
       </div>
 
       <div className="relative max-w-md">
@@ -72,10 +366,16 @@ export default function StockPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filtered.map(product => (
           <div key={product.id} className="bg-card rounded-xl border border-border shadow-card overflow-hidden group hover:shadow-lg transition-shadow">
-            <div className="aspect-square relative overflow-hidden">
-              <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+            <div className="aspect-square relative overflow-hidden bg-muted">
+              {product.image ? (
+                <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <Package className="h-16 w-16 text-muted-foreground" />
+                </div>
+              )}
               <div className="absolute top-2 right-2 flex gap-1">
-                <button onClick={() => { setEditingProduct(product); setShowForm(true); }} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-card transition-colors">
+                <button onClick={() => { setEditingProduct(product); setImagePreview(product.image || ''); setShowForm(true); }} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-card transition-colors">
                   <Edit className="h-3.5 w-3.5 text-foreground" />
                 </button>
                 <button onClick={() => handleDelete(product.id)} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-destructive hover:text-destructive-foreground transition-colors">
@@ -95,11 +395,13 @@ export default function StockPage() {
                 <span className="text-lg font-bold text-primary">R$ {product.price.toFixed(2)}</span>
                 <span className="text-sm text-muted-foreground">{product.quantity} un.</span>
               </div>
-              <div className="flex gap-1 mt-2 flex-wrap">
-                {product.size.map(s => (
-                  <span key={s} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-xs">{s}</span>
-                ))}
-              </div>
+              {product.size && product.size.length > 0 && (
+                <div className="flex gap-1 mt-2 flex-wrap">
+                  {product.size.map((s: string) => (
+                    <span key={s} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-xs">{s}</span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -107,64 +409,381 @@ export default function StockPage() {
 
       {/* Product Form Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">{editingProduct ? 'Editar Produto' : 'Novo Produto'}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSave} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
+              {/* Upload de Imagem */}
+              <div className="col-span-2 space-y-2">
+                <Label>Imagem do Produto</Label>
+                <div className="flex gap-4 items-start">
+                  <div className="flex-shrink-0">
+                    {imagePreview ? (
+                      <img src={imagePreview} alt="Preview" className="w-32 h-32 object-cover rounded-lg border-2 border-border" />
+                    ) : (
+                      <div className="w-32 h-32 bg-muted rounded-lg border-2 border-dashed border-border flex items-center justify-center">
+                        <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={handleImageSelect}
+                      className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 cursor-pointer"
+                    />
+                    <p className="text-xs text-muted-foreground">Formatos aceitos: JPG, PNG, WEBP. Tamanho máximo: 5MB</p>
+                  </div>
+                </div>
+              </div>
+
               <div className="col-span-2 space-y-1">
-                <Label>Nome</Label>
+                <Label>Nome *</Label>
                 <Input name="name" required defaultValue={editingProduct?.name} />
               </div>
+              
               <div className="col-span-2 space-y-1">
                 <Label>Descrição</Label>
                 <textarea name="description" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none h-20" defaultValue={editingProduct?.description} />
               </div>
+              
               <div className="space-y-1">
-                <Label>Categoria</Label>
-                <Input name="category" required defaultValue={editingProduct?.category} />
+                <Label>Categoria *</Label>
+                <select name="category" required defaultValue={editingProduct?.category} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <option value="">Selecione...</option>
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
+                </select>
               </div>
+              
               <div className="space-y-1">
-                <Label>SKU</Label>
+                <Label>Cor *</Label>
+                <select name="color" required defaultValue={editingProduct?.color} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <option value="">Selecione...</option>
+                  {colors.map(color => (
+                    <option key={color.id} value={color.name}>
+                      {color.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="col-span-2 space-y-2">
+                <Label>Tamanhos *</Label>
+                <div className="flex flex-wrap gap-3">
+                  {sizes.map(size => (
+                    <label key={size.id} className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        name={`size_${size.id}`}
+                        defaultChecked={editingProduct?.size?.includes(size.name)}
+                        className="rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <span className="text-sm">{size.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="space-y-1">
+                <Label>SKU *</Label>
                 <Input name="sku" required defaultValue={editingProduct?.sku} />
               </div>
+              
               <div className="space-y-1">
-                <Label>Preço Venda</Label>
-                <Input name="price" type="number" step="0.01" required defaultValue={editingProduct?.price} />
-              </div>
-              <div className="space-y-1">
-                <Label>Preço Custo</Label>
-                <Input name="costPrice" type="number" step="0.01" required defaultValue={editingProduct?.costPrice} />
-              </div>
-              <div className="space-y-1">
-                <Label>Quantidade</Label>
-                <Input name="quantity" type="number" required defaultValue={editingProduct?.quantity} />
-              </div>
-              <div className="space-y-1">
-                <Label>Estoque Mínimo</Label>
+                <Label>Estoque Mínimo *</Label>
                 <Input name="minStock" type="number" required defaultValue={editingProduct?.minStock} />
               </div>
+              
               <div className="space-y-1">
-                <Label>Tamanhos (separados por vírgula)</Label>
-                <Input name="sizes" required defaultValue={editingProduct?.size.join(', ')} />
+                <Label>Quantidade *</Label>
+                <Input name="quantity" type="number" required defaultValue={editingProduct?.quantity} />
               </div>
+              
               <div className="space-y-1">
-                <Label>Cor</Label>
-                <Input name="color" required defaultValue={editingProduct?.color} />
+                <Label>Preço Custo *</Label>
+                <Input name="costPrice" type="number" step="0.01" required defaultValue={editingProduct?.costPrice} />
               </div>
-              <div className="col-span-2 space-y-1">
-                <Label>URL da Imagem</Label>
-                <Input name="image" defaultValue={editingProduct?.image} placeholder="https://..." />
+              
+              <div className="space-y-1">
+                <Label>Preço Venda *</Label>
+                <Input name="price" type="number" step="0.01" required defaultValue={editingProduct?.price} />
               </div>
             </div>
+            
             <div className="flex gap-3 justify-end pt-2">
               <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancelar</Button>
-              <Button type="submit" className="gradient-primary text-primary-foreground">Salvar</Button>
+              <Button type="submit" disabled={uploadingImage} className="gradient-primary text-primary-foreground">
+                {uploadingImage ? 'Enviando...' : 'Salvar'}
+              </Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Attributes Management Dialog */}
+      <AttributesDialog 
+        open={showAttributes}
+        onClose={() => setShowAttributes(false)}
+        categories={categories}
+        sizes={sizes}
+        colors={colors}
+        onReload={loadAttributes}
+        toast={toast}
+      />
+
+      {/* XML Import Dialog */}
+      <Dialog open={showXmlImport} onOpenChange={setShowXmlImport}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">Entrada de Estoque via XML NF-e</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <input 
+                ref={xmlInputRef}
+                type="file" 
+                accept=".xml,application/xml" 
+                onChange={e => handleXmlFile(e.target.files ? e.target.files[0] : null)} 
+                className="hidden" 
+              />
+              <Button 
+                type="button" 
+                onClick={() => xmlInputRef.current?.click()}
+                className="flex-1 gap-2"
+              >
+                <UploadCloud className="h-4 w-4" /> Selecionar XML
+              </Button>
+              <Button onClick={handleImportEntry} disabled={parsedItems.length === 0} className="gap-2 gradient-primary">
+                <TrendingUp className="h-4 w-4" /> Lançar Entrada
+              </Button>
+            </div>
+
+            {parsedItems.length > 0 && (
+              <div className="border border-border rounded-lg overflow-hidden">
+                <div className="bg-muted/30 px-4 py-2 border-b border-border">
+                  <p className="text-sm font-medium">{parsedItems.length} itens encontrados no XML</p>
+                </div>
+                <div className="overflow-x-auto max-h-96">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-muted/30 border-b border-border">
+                      <tr>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">Código</th>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">Descrição</th>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">NCM</th>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">Un</th>
+                        <th className="text-right py-2 px-3 text-muted-foreground font-medium">Qtd</th>
+                        <th className="text-right py-2 px-3 text-muted-foreground font-medium">V. Unit</th>
+                        <th className="text-right py-2 px-3 text-muted-foreground font-medium">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedItems.map((item, idx) => (
+                        <tr key={idx} className="border-b border-border/50 hover:bg-muted/20">
+                          <td className="py-2 px-3 text-foreground">{item.code || '-'}</td>
+                          <td className="py-2 px-3 text-foreground max-w-[200px] truncate">{item.description || '-'}</td>
+                          <td className="py-2 px-3 text-foreground">{item.ncm || '-'}</td>
+                          <td className="py-2 px-3 text-foreground">{item.unit || '-'}</td>
+                          <td className="py-2 px-3 text-right">{item.quantity || '-'}</td>
+                          <td className="py-2 px-3 text-right">R$ {item.unitPrice || '-'}</td>
+                          <td className="py-2 px-3 text-right">R$ {item.total || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+// Componente de Gerenciamento de Atributos
+interface AttributesDialogProps {
+  open: boolean;
+  onClose: () => void;
+  categories: Category[];
+  sizes: Size[];
+  colors: Color[];
+  onReload: () => void;
+  toast: ReturnType<typeof useToast>['toast'];
+}
+
+function AttributesDialog({ open, onClose, categories, sizes, colors, onReload, toast }: AttributesDialogProps) {
+  const [tab, setTab] = useState<'categories' | 'sizes' | 'colors'>('categories');
+  const [newName, setNewName] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newHexCode, setNewHexCode] = useState('#000000');
+  const [newOrder, setNewOrder] = useState(0);
+
+  const handleAddCategory = async () => {
+    if (!newName.trim()) return;
+    try {
+      await createCategory({ name: newName, description: newDescription });
+      toast({ title: 'Sucesso', description: 'Categoria adicionada', className: 'bg-green-600 text-white border-0' });
+      setNewName('');
+      setNewDescription('');
+      onReload();
+    } catch (error) {
+      toast({ title: 'Erro', description: error instanceof Error ? error.message : 'Erro ao adicionar', variant: 'destructive' });
+    }
+  };
+
+  const handleAddSize = async () => {
+    if (!newName.trim()) return;
+    try {
+      await createSize({ name: newName, order: newOrder });
+      toast({ title: 'Sucesso', description: 'Tamanho adicionado', className: 'bg-green-600 text-white border-0' });
+      setNewName('');
+      setNewOrder(0);
+      onReload();
+    } catch (error) {
+      toast({ title: 'Erro', description: error instanceof Error ? error.message : 'Erro ao adicionar', variant: 'destructive' });
+    }
+  };
+
+  const handleAddColor = async () => {
+    if (!newName.trim()) return;
+    try {
+      await createColor({ name: newName, hexCode: newHexCode });
+      toast({ title: 'Sucesso', description: 'Cor adicionada', className: 'bg-green-600 text-white border-0' });
+      setNewName('');
+      setNewHexCode('#000000');
+      onReload();
+    } catch (error) {
+      toast({ title: 'Erro', description: error instanceof Error ? error.message : 'Erro ao adicionar', variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    if (!confirm('Deseja deletar esta categoria?')) return;
+    try {
+      await deleteCategory(id);
+      toast({ title: 'Sucesso', description: 'Categoria deletada', className: 'bg-green-600 text-white border-0' });
+      onReload();
+    } catch (error) {
+      toast({ title: 'Erro', description: error instanceof Error ? error.message : 'Erro ao deletar', variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteSize = async (id: string) => {
+    if (!confirm('Deseja deletar este tamanho?')) return;
+    try {
+      await deleteSize(id);
+      toast({ title: 'Sucesso', description: 'Tamanho deletado', className: 'bg-green-600 text-white border-0' });
+      onReload();
+    } catch (error) {
+      toast({ title: 'Erro', description: error instanceof Error ? error.message : 'Erro ao deletar', variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteColor = async (id: string) => {
+    if (!confirm('Deseja deletar esta cor?')) return;
+    try {
+      await deleteColor(id);
+      toast({ title: 'Sucesso', description: 'Cor deletada', className: 'bg-green-600 text-white border-0' });
+      onReload();
+    } catch (error) {
+      toast({ title: 'Erro', description: error instanceof Error ? error.message : 'Erro ao deletar', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="font-display">Gerenciar Atributos</DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          {/* Tabs */}
+          <div className="flex gap-2 border-b border-border">
+            <button onClick={() => setTab('categories')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === 'categories' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+              Categorias
+            </button>
+            <button onClick={() => setTab('sizes')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === 'sizes' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+              Tamanhos
+            </button>
+            <button onClick={() => setTab('colors')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === 'colors' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+              Cores
+            </button>
+          </div>
+
+          {/* Categorias */}
+          {tab === 'categories' && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Input placeholder="Nome da categoria" value={newName} onChange={e => setNewName(e.target.value)} />
+                <Input placeholder="Descrição (opcional)" value={newDescription} onChange={e => setNewDescription(e.target.value)} />
+                <Button onClick={handleAddCategory} className="gap-2"><Plus className="h-4 w-4" /> Adicionar</Button>
+              </div>
+              <div className="space-y-2">
+                {categories.map((cat: Category) => (
+                  <div key={cat.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                    <div>
+                      <p className="font-medium">{cat.name}</p>
+                      {cat.description && <p className="text-sm text-muted-foreground">{cat.description}</p>}
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => handleDeleteCategory(cat.id)}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tamanhos */}
+          {tab === 'sizes' && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Input placeholder="Nome do tamanho" value={newName} onChange={e => setNewName(e.target.value)} />
+                <Input placeholder="Ordem" type="number" value={newOrder} onChange={e => setNewOrder(parseInt(e.target.value))} className="w-24" />
+                <Button onClick={handleAddSize} className="gap-2"><Plus className="h-4 w-4" /> Adicionar</Button>
+              </div>
+              <div className="space-y-2">
+                {sizes.map((size: Size) => (
+                  <div key={size.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium">{size.name}</span>
+                      <span className="text-xs text-muted-foreground">(Ordem: {size.order})</span>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => handleDeleteSize(size.id)}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Cores */}
+          {tab === 'colors' && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Input placeholder="Nome da cor" value={newName} onChange={e => setNewName(e.target.value)} />
+                <Input placeholder="Código hex" type="color" value={newHexCode} onChange={e => setNewHexCode(e.target.value)} className="w-24" />
+                <Button onClick={handleAddColor} className="gap-2"><Plus className="h-4 w-4" /> Adicionar</Button>
+              </div>
+              <div className="space-y-2">
+                {colors.map((color: Color) => (
+                  <div key={color.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      {color.hexCode && <div className="w-6 h-6 rounded" style={{ backgroundColor: color.hexCode }} />}
+                      <span className="font-medium">{color.name}</span>
+                      {color.hexCode && <span className="text-xs text-muted-foreground">{color.hexCode}</span>}
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => handleDeleteColor(color.id)}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

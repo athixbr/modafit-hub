@@ -1,26 +1,65 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Moon, Sun, Dumbbell } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { Moon, Sun, Dumbbell, Loader } from 'lucide-react';
+import { FaWhatsapp } from 'react-icons/fa';
+import { login as apiLogin } from '@/lib/api';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const { login, setUser } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { toast } = useToast();
+  const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       setError('Preencha todos os campos');
+      toast({ title: 'Erro', description: 'Preencha todos os campos', variant: 'destructive' });
       return;
     }
-    const success = login(email, password);
-    if (!success) setError('Credenciais inválidas');
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await apiLogin(email, password);
+      
+      if (response.success && response.token && response.user) {
+        // Armazenar token no localStorage
+        localStorage.setItem('token', response.token);
+        localStorage.setItem('user', JSON.stringify(response.user));
+
+        // Atualizar usuário no contexto para refletir no header
+        setUser(response.user);
+
+        // Fazer login no contexto local (marca isAuthenticated)
+        login(response.user.email, response.user.email);
+
+        toast({ title: 'Sucesso', description: 'Login efetuado. Redirecionando...' });
+
+        // Redirecionar para o admin
+        navigate('/admin');
+      } else {
+        const msg = response.error || 'Erro ao fazer login';
+        setError(msg);
+        toast({ title: 'Erro', description: msg, variant: 'destructive' });
+      }
+    } catch (err: any) {
+      const msg = err.message || 'Erro ao conectar ao servidor';
+      setError(msg);
+      toast({ title: 'Erro', description: msg, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,10 +88,10 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">E-mail</Label>
+            <div>
               <Input
                 id="email"
+                aria-label="E-mail"
                 type="email"
                 placeholder="seu@email.com"
                 value={email}
@@ -60,10 +99,10 @@ export default function LoginPage() {
                 className="h-11"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Senha</Label>
+            <div>
               <Input
                 id="password"
+                aria-label="Senha"
                 type="password"
                 placeholder="••••••••"
                 value={password}
@@ -72,16 +111,39 @@ export default function LoginPage() {
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full h-11 gradient-primary text-primary-foreground font-semibold">
-              Entrar
+            <Button 
+              type="submit" 
+              className="w-full h-11 gradient-primary text-primary-foreground font-semibold"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <Loader className="h-4 w-4 mr-2 animate-spin" />
+                  Entrando...
+                </>
+              ) : (
+                'Entrar'
+              )}
             </Button>
           </form>
 
-          <p className="text-center text-xs text-muted-foreground mt-6">
-            Use qualquer email e senha para acessar
+          <p className="text-center text-xs text-muted-foreground mt-4">
+            Desenvolvido e mantido por <strong>ATHIX</strong> — <a href="https://www.athix.com.br" target="_blank" rel="noopener noreferrer" className="underline">www.athix.com.br</a>
           </p>
         </div>
       </div>
+
+      {/* Floating WhatsApp button */}
+      <a
+        href="https://wa.me/5566981015324"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-6 right-6 z-50 bg-yellow-400 hover:bg-yellow-500 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center"
+        aria-label="WhatsApp"
+        title="(66) 98101-5324"
+      >
+        <FaWhatsapp className="w-6 h-6" />
+      </a>
     </div>
   );
 }

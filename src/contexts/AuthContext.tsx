@@ -1,37 +1,54 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'user';
+}
 
 interface AuthContextType {
   isAuthenticated: boolean;
-  user: { name: string; email: string; role: string } | null;
+  user: User | null;
   login: (email: string, password: string) => boolean;
   logout: () => void;
+  setUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('vidativa-auth') === 'true';
+    return localStorage.getItem('token') !== null;
   });
 
-  const [user] = useState({ name: 'Admin Vidativa', email: 'admin@vidativa.com', role: 'Administrador' });
+  const [user, setUserState] = useState<User | null>(() => {
+    const savedUser = localStorage.getItem('user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
 
   const login = (email: string, password: string) => {
     if (email && password) {
       setIsAuthenticated(true);
-      localStorage.setItem('vidativa-auth', 'true');
       return true;
     }
     return false;
   };
 
+  const setUser = (newUser: User) => {
+    setUserState(newUser);
+    localStorage.setItem('user', JSON.stringify(newUser));
+  };
+
   const logout = () => {
     setIsAuthenticated(false);
-    localStorage.removeItem('vidativa-auth');
+    setUserState(null);
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user: isAuthenticated ? user : null, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, login, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

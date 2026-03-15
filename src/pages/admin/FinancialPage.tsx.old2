@@ -1,0 +1,264 @@
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Plus, DollarSign, TrendingUp, TrendingDown, Check, Trash2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { 
+  getTransactions, 
+  getTransactionsSummary, 
+  getCashFlow,
+  createTransaction, 
+  payTransaction, 
+  deleteTransaction 
+} from '@/lib/api';
+
+interface Transaction {
+  id: number;
+  type: 'receivable' | 'payable';
+  category: string;
+  description: string;
+  amount: string;
+  dueDate: string;
+  paidDate: string | null;
+  status: 'pending' | 'paid' | 'overdue';
+}
+
+interface Summary {
+  totalReceivables: number;
+  totalPayables: number;
+  balance: number;
+}
+
+export default function FinancialPage() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [summary, setSummary] = useState<Summary>({ totalReceivables: 0, totalPayables: 0, balance: 0 });
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const { toast } = useToast();
+
+  const [formData, setFormData] = useState({
+    type: 'receivable',
+    category: '',
+    description: '',
+    amount: '',
+    dueDate: new Date().toISOString().split('T')[0]
+  });
+
+  useEffect(() => {
+    loadData();
+  }, [filter]);
+
+  const loadData = async () => {
+    try {
+      const params: any = {};
+      if (filter !== 'all') params.status = filter;
+      
+      const [txData, summaryData] = await Promise.all([
+        getTransactions(params),
+        getTransactionsSummary()
+      ]);
+      
+      setTransactions(txData);
+      setSummary(summaryData);
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!formData.description || !formData.amount || parseFloat(formData.amount) <= 0) {
+      toast({ title: 'Erro', description: 'Preencha todos os campos', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      await createTransaction(formData);
+      toast({ title: 'Sucesso', description: 'Transação criada' });
+      setOpen(false);
+      setFormData({ type: 'receivable', category: '', description: '', amount: '', dueDate: new Date().toISOString().split('T')[0] });
+      loadData();
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const handlePay = async (id: number) => {
+    try {
+      await payTransaction(id);
+      toast({ title: 'Sucesso', description: 'Transação marcada como paga' });
+      loadData();
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Confirma exclusão?')) return;
+    try {
+      await deleteTransaction(id);
+      toast({ title: 'Sucesso', description: 'Transação excluída' });
+      loadData();
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, 'default' | 'secondary' | 'destructive'> = {
+      pending: 'secondary',
+      paid: 'default',
+      overdue: 'destructive'
+    };
+    return <Badge variant={variants[status] || 'default'}>{status === 'paid' ? 'Pago' : status === 'overdue' ? 'Vencido' : 'Pendente'}</Badge>;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Financeiro</h1>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button><Plus className="h-4 w-4 mr-2" />Nova Transação</Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Nova Transação</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Tipo</Label>
+                <Select value={formData.type} onValueChange={(v) => setFormData({ ...formData, type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="receivable">A Receber</SelectItem>
+                    <SelectItem value="payable">A Pagar</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Categoria</Label>
+                <Input value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} placeholder="Ex: Venda, Fornecedor" />
+              </div>
+              <div>
+                <Label>Descrição</Label>
+                <Input value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="Descrição" />
+              </div>
+              <div>
+                <Label>Valor (R$)</Label>
+                <Input type="number" step="0.01" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} placeholder="0.00" />
+              </div>
+              <div>
+                <Label>Data de Vencimento</Label>
+                <Input type="date" value={formData.dueDate} onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })} />
+              </div>
+              <Button onClick={handleCreate} className="w-full">Criar</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">A Receber</CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">R$ {summary.totalReceivables.toFixed(2)}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">A Pagar</CardTitle>
+            <TrendingDown className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">R$ {summary.totalPayables.toFixed(2)}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Saldo</CardTitle>
+            <DollarSign className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">R$ {summary.balance.toFixed(2)}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <CardTitle>Transações</CardTitle>
+            <Select value={filter} onValueChange={setFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                <SelectItem value="pending">Pendentes</SelectItem>
+                <SelectItem value="paid">Pagas</SelectItem>
+                <SelectItem value="overdue">Vencidas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Categoria</TableHead>
+                <TableHead>Descrição</TableHead>
+                <TableHead>Valor</TableHead>
+                <TableHead>Vencimento</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {transactions.map((tx) => (
+                <TableRow key={tx.id}>
+                  <TableCell>{tx.id}</TableCell>
+                  <TableCell>{tx.type === 'receivable' ? 'A Receber' : 'A Pagar'}</TableCell>
+                  <TableCell>{tx.category}</TableCell>
+                  <TableCell>{tx.description}</TableCell>
+                  <TableCell className={tx.type === 'receivable' ? 'text-green-600' : 'text-red-600'}>
+                    R$ {parseFloat(tx.amount).toFixed(2)}
+                  </TableCell>
+                  <TableCell>{new Date(tx.dueDate).toLocaleDateString('pt-BR')}</TableCell>
+                  <TableCell>{getStatusBadge(tx.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      {tx.status !== 'paid' && (
+                        <Button size="sm" variant="outline" onClick={() => handlePay(tx.id)}>
+                          <Check className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Button size="sm" variant="destructive" onClick={() => handleDelete(tx.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {transactions.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">Nenhuma transação encontrada</div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

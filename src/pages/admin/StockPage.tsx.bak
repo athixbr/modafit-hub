@@ -1,0 +1,489 @@
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Plus, Search, Edit, Trash2, Package, UploadCloud, FileText, Download, TrendingUp, History } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+
+interface Product {
+  id: string;
+  name: string;
+  description?: string;
+  category: string;
+  size?: string[];
+  color?: string;
+  price: number;
+  costPrice: number;
+  quantity: number;
+  minStock: number;
+  sku: string;
+  image?: string;
+  images?: string[];
+  active: boolean;
+  createdAt?: string;
+}
+
+interface InvoiceItem {
+  code?: string;
+  ean?: string;
+  description?: string;
+  ncm?: string;
+  cfop?: string;
+  unit?: string;
+  quantity?: string;
+  unitPrice?: string;
+  total?: string;
+}
+
+interface StockEntry {
+  productId?: string;
+  productCode?: string;
+  productEan?: string;
+  productDescription?: string;
+  productNcm?: string;
+  productCfop?: string;
+  productUnit?: string;
+  quantity: number;
+  unitPrice?: number;
+  totalPrice?: number;
+}
+
+export default function StockPage() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [search, setSearch] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [showXmlImport, setShowXmlImport] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [parsedItems, setParsedItems] = useState<InvoiceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  // Carregar produtos
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const loadProducts = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('http://localhost:3001/api/products', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      const data = await response.json();
+      if (data.success) {
+        setProducts(data.data || []);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar produtos:', error);
+      toast({
+        title: 'Erro',
+        description: 'Não foi possível carregar os produtos',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(search.toLowerCase()) ||
+    p.sku.toLowerCase().includes(search.toLowerCase()) ||
+    p.category.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const parseXml = (xmlText: string): InvoiceItem[] => {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlText, 'application/xml');
+
+      const dets = Array.from(doc.getElementsByTagNameNS('*', 'det'));
+      if (dets.length === 0) {
+        const dets2 = Array.from(doc.getElementsByTagName('det'));
+        return dets2.map(det => extractFromDet(det));
+      }
+      return dets.map(det => extractFromDet(det));
+    } catch (err) {
+      console.error('XML parse error', err);
+      return [];
+    }
+  };
+
+  const extractFromDet = (det: Element): InvoiceItem => {
+    const prod = Array.from(det.children).find(c => c.localName === 'prod');
+    if (!prod) return {};
+    const get = (name: string) => {
+      const el = prod.querySelector(name) || prod.querySelector(`[local-name()="${name}"]` as any);
+      if (el) return el.textContent || undefined;
+      const found = Array.from(prod.children).find(c => c.localName?.toLowerCase() === name.toLowerCase());
+      return found?.textContent || undefined;
+    };
+
+    return {
+      code: get('cProd'),
+      ean: get('cEAN'),
+      description: get('xProd'),
+      ncm: get('NCM'),
+      cfop: get('CFOP'),
+      unit: get('uCom'),
+      quantity: get('qCom'),
+      unitPrice: get('vUnCom'),
+      total: get('vProd')
+    };
+  };
+
+  const handleXmlFile = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result as string;
+      const items = parseXml(text);
+      setParsedItems(items);
+      toast({ title: 'Arquivo lido', description: `${items.length} itens encontrados` });
+    };
+    reader.onerror = () => {
+      toast({ title: 'Erro', description: 'Não foi possível ler o arquivo', variant: 'destructive' });
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  const handleImportEntry = async () => {
+    if (parsedItems.length === 0) {
+      toast({ title: 'Nada para importar', description: 'Carregue um XML primeiro', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const entries: StockEntry[] = parsedItems.map(item => ({
+        productCode: item.code,
+        productEan: item.ean,
+        productDescription: item.description,
+        productNcm: item.ncm,
+        productCfop: item.cfop,
+        productUnit: item.unit,
+        quantity: parseInt(item.quantity || '0'),
+        unitPrice: parseFloat(item.unitPrice || '0'),
+        totalPrice: parseFloat(item.total || '0')
+      }));
+
+      const response = await fetch('http://localhost:3001/api/stock-movements/entry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          items: entries,
+          notes: 'Importação via XML NF-e'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: 'Sucesso',
+          description: data.message,
+          className: 'bg-green-600 text-white border-0'
+        });
+        setParsedItems([]);
+        setShowXmlImport(false);
+        loadProducts();
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Erro',
+        description: error.message || 'Erro ao importar entradas',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Deseja realmente deletar este produto?')) return;
+
+    try {
+      const response = await fetch(`http://localhost:3001/api/products/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: 'Sucesso',
+          description: 'Produto deletado',
+          className: 'bg-green-600 text-white border-0'
+        });
+        loadProducts();
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Erro',
+        description: error.message || 'Erro ao deletar produto',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    
+    const productData = {
+      name: form.get('name') as string,
+      description: form.get('description') as string,
+      category: form.get('category') as string,
+      size: (form.get('sizes') as string).split(',').map(s => s.trim()),
+      color: form.get('color') as string,
+      price: parseFloat(form.get('price') as string),
+      costPrice: parseFloat(form.get('costPrice') as string),
+      quantity: parseInt(form.get('quantity') as string),
+      minStock: parseInt(form.get('minStock') as string),
+      sku: form.get('sku') as string,
+      image: form.get('image') as string || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=400',
+      active: true
+    };
+
+    try {
+      const url = editingProduct 
+        ? `http://localhost:3001/api/products/${editingProduct.id}`
+        : 'http://localhost:3001/api/products';
+      
+      const response = await fetch(url, {
+        method: editingProduct ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(productData)
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        toast({
+          title: 'Sucesso',
+          description: data.message,
+          className: 'bg-green-600 text-white border-0'
+        });
+        setShowForm(false);
+        setEditingProduct(null);
+        loadProducts();
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Erro',
+        description: error.message || 'Erro ao salvar produto',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="w-12 h-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Carregando estoque...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold font-display text-foreground">Estoque</h1>
+          <p className="text-muted-foreground">{products.length} produtos cadastrados</p>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowXmlImport(true)} variant="outline" className="gap-2">
+            <TrendingUp className="h-4 w-4" /> Entrada (XML NF-e)
+          </Button>
+          <Button onClick={() => { setEditingProduct(null); setShowForm(true); }} className="gradient-primary text-primary-foreground gap-2">
+            <Plus className="h-4 w-4" /> Novo Produto
+          </Button>
+        </div>
+      </div>
+
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input placeholder="Buscar por nome, SKU ou categoria..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filtered.map(product => (
+          <div key={product.id} className="bg-card rounded-xl border border-border shadow-card overflow-hidden group hover:shadow-lg transition-shadow">
+            <div className="aspect-square relative overflow-hidden bg-muted">
+              {product.image ? (
+                <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <Package className="h-16 w-16 text-muted-foreground" />
+                </div>
+              )}
+              <div className="absolute top-2 right-2 flex gap-1">
+                <button onClick={() => { setEditingProduct(product); setShowForm(true); }} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-card transition-colors">
+                  <Edit className="h-3.5 w-3.5 text-foreground" />
+                </button>
+                <button onClick={() => handleDelete(product.id)} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-destructive hover:text-destructive-foreground transition-colors">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {product.quantity <= product.minStock && (
+                <div className="absolute bottom-2 left-2 px-2 py-1 rounded-md bg-destructive/90 text-destructive-foreground text-xs font-medium">
+                  Estoque baixo
+                </div>
+              )}
+            </div>
+            <div className="p-4">
+              <p className="text-xs text-muted-foreground mb-1">{product.sku} • {product.category}</p>
+              <h3 className="font-semibold text-foreground truncate">{product.name}</h3>
+              <div className="flex items-center justify-between mt-3">
+                <span className="text-lg font-bold text-primary">R$ {product.price.toFixed(2)}</span>
+                <span className="text-sm text-muted-foreground">{product.quantity} un.</span>
+              </div>
+              {product.size && product.size.length > 0 && (
+                <div className="flex gap-1 mt-2 flex-wrap">
+                  {product.size.map((s: string) => (
+                    <span key={s} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-xs">{s}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Product Form Dialog */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">{editingProduct ? 'Editar Produto' : 'Novo Produto'}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSave} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 space-y-1">
+                <Label>Nome</Label>
+                <Input name="name" required defaultValue={editingProduct?.name} />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label>Descrição</Label>
+                <textarea name="description" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none h-20" defaultValue={editingProduct?.description} />
+              </div>
+              <div className="space-y-1">
+                <Label>Categoria</Label>
+                <Input name="category" required defaultValue={editingProduct?.category} />
+              </div>
+              <div className="space-y-1">
+                <Label>SKU</Label>
+                <Input name="sku" required defaultValue={editingProduct?.sku} />
+              </div>
+              <div className="space-y-1">
+                <Label>Preço Venda</Label>
+                <Input name="price" type="number" step="0.01" required defaultValue={editingProduct?.price} />
+              </div>
+              <div className="space-y-1">
+                <Label>Preço Custo</Label>
+                <Input name="costPrice" type="number" step="0.01" required defaultValue={editingProduct?.costPrice} />
+              </div>
+              <div className="space-y-1">
+                <Label>Quantidade</Label>
+                <Input name="quantity" type="number" required defaultValue={editingProduct?.quantity} />
+              </div>
+              <div className="space-y-1">
+                <Label>Estoque Mínimo</Label>
+                <Input name="minStock" type="number" required defaultValue={editingProduct?.minStock} />
+              </div>
+              <div className="space-y-1">
+                <Label>Tamanhos (separados por vírgula)</Label>
+                <Input name="sizes" required defaultValue={editingProduct?.size?.join(', ')} />
+              </div>
+              <div className="space-y-1">
+                <Label>Cor</Label>
+                <Input name="color" required defaultValue={editingProduct?.color} />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label>URL da Imagem</Label>
+                <Input name="image" defaultValue={editingProduct?.image} placeholder="https://..." />
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end pt-2">
+              <Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancelar</Button>
+              <Button type="submit" className="gradient-primary text-primary-foreground">Salvar</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* XML Import Dialog */}
+      <Dialog open={showXmlImport} onOpenChange={setShowXmlImport}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">Entrada de Estoque via XML NF-e</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <label className="flex-1">
+                <input type="file" accept=".xml,application/xml" onChange={e => handleXmlFile(e.target.files ? e.target.files[0] : null)} className="hidden" />
+                <Button type="button" className="w-full gap-2"><UploadCloud className="h-4 w-4" /> Selecionar XML</Button>
+              </label>
+              <Button onClick={handleImportEntry} disabled={parsedItems.length === 0} className="gap-2 gradient-primary">
+                <TrendingUp className="h-4 w-4" /> Lançar Entrada
+              </Button>
+            </div>
+
+            {parsedItems.length > 0 && (
+              <div className="border border-border rounded-lg overflow-hidden">
+                <div className="bg-muted/30 px-4 py-2 border-b border-border">
+                  <p className="text-sm font-medium">{parsedItems.length} itens encontrados no XML</p>
+                </div>
+                <div className="overflow-x-auto max-h-96">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-muted/30 border-b border-border">
+                      <tr>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">Código</th>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">Descrição</th>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">NCM</th>
+                        <th className="text-left py-2 px-3 text-muted-foreground font-medium">Un</th>
+                        <th className="text-right py-2 px-3 text-muted-foreground font-medium">Qtd</th>
+                        <th className="text-right py-2 px-3 text-muted-foreground font-medium">V. Unit</th>
+                        <th className="text-right py-2 px-3 text-muted-foreground font-medium">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedItems.map((item, idx) => (
+                        <tr key={idx} className="border-b border-border/50 hover:bg-muted/20">
+                          <td className="py-2 px-3 text-foreground">{item.code || '-'}</td>
+                          <td className="py-2 px-3 text-foreground max-w-[200px] truncate">{item.description || '-'}</td>
+                          <td className="py-2 px-3 text-foreground">{item.ncm || '-'}</td>
+                          <td className="py-2 px-3 text-foreground">{item.unit || '-'}</td>
+                          <td className="py-2 px-3 text-right">{item.quantity || '-'}</td>
+                          <td className="py-2 px-3 text-right">R$ {item.unitPrice || '-'}</td>
+                          <td className="py-2 px-3 text-right">R$ {item.total || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

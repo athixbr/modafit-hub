@@ -1,0 +1,236 @@
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Package, Users, ShoppingCart, DollarSign, TrendingUp, AlertTriangle } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import {
+  getReportsSummary,
+  getTopProducts,
+  getSalesByPeriod,
+  getOrdersByStatus,
+  getLowStockProducts,
+  getTopCustomers
+} from '@/lib/api';
+
+interface Summary {
+  totalProducts: number;
+  totalCustomers: number;
+  totalOrders: number;
+  totalRevenue: number;
+}
+
+interface TopProduct {
+  id: number;
+  name: string;
+  totalSold: number;
+  totalRevenue: number;
+}
+
+interface TopCustomer {
+  id: number;
+  name: string;
+  totalOrders: number;
+  totalSpent: number;
+}
+
+interface LowStockProduct {
+  id: number;
+  name: string;
+  currentStock: number;
+  minStock: number;
+}
+
+export default function ReportsPage() {
+  const [summary, setSummary] = useState<Summary>({ totalProducts: 0, totalCustomers: 0, totalOrders: 0, totalRevenue: 0 });
+  const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
+  const [topCustomers, setTopCustomers] = useState<TopCustomer[]>([]);
+  const [lowStock, setLowStock] = useState<LowStockProduct[]>([]);
+  const [period, setPeriod] = useState('month');
+  const { toast } = useToast();
+
+  useEffect(() => {
+    loadData();
+  }, [period]);
+
+  const loadData = async () => {
+    try {
+      const [summaryData, productsData, customersData, stockData] = await Promise.all([
+        getReportsSummary(),
+        getTopProducts(10),
+        getTopCustomers(10),
+        getLowStockProducts()
+      ]);
+
+      setSummary(summaryData);
+      setTopProducts(productsData);
+      setTopCustomers(customersData);
+      setLowStock(stockData);
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Relatórios</h1>
+        <Select value={period} onValueChange={setPeriod}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="day">Hoje</SelectItem>
+            <SelectItem value="week">Esta Semana</SelectItem>
+            <SelectItem value="month">Este Mês</SelectItem>
+            <SelectItem value="year">Este Ano</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Produtos</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{summary.totalProducts}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Clientes</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{summary.totalCustomers}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Pedidos</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{summary.totalOrders}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Receita Total</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">R$ {summary.totalRevenue.toFixed(2)}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Top 10 Produtos Mais Vendidos
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Produto</TableHead>
+                  <TableHead>Qtd Vendida</TableHead>
+                  <TableHead>Receita</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {topProducts.map((product) => (
+                  <TableRow key={product.id}>
+                    <TableCell className="font-medium">{product.name}</TableCell>
+                    <TableCell>{product.totalSold}</TableCell>
+                    <TableCell>R$ {product.totalRevenue.toFixed(2)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {topProducts.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">Nenhum produto encontrado</div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Top 10 Melhores Clientes
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Pedidos</TableHead>
+                  <TableHead>Total Gasto</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {topCustomers.map((customer) => (
+                  <TableRow key={customer.id}>
+                    <TableCell className="font-medium">{customer.name}</TableCell>
+                    <TableCell>{customer.totalOrders}</TableCell>
+                    <TableCell>R$ {customer.totalSpent.toFixed(2)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {topCustomers.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">Nenhum cliente encontrado</div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-yellow-600" />
+            Produtos com Estoque Baixo
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>Produto</TableHead>
+                <TableHead>Estoque Atual</TableHead>
+                <TableHead>Estoque Mínimo</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lowStock.map((product) => (
+                <TableRow key={product.id}>
+                  <TableCell>{product.id}</TableCell>
+                  <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell className="text-red-600 font-bold">{product.currentStock}</TableCell>
+                  <TableCell>{product.minStock}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {lowStock.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">
+              Todos os produtos estão com estoque adequado
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

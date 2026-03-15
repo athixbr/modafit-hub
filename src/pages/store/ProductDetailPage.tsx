@@ -34,8 +34,11 @@ export default function ProductDetailPage() {
             <ArrowLeft className="h-4 w-4" /> Voltar
           </Link>
           <Link to="/loja" className="flex items-center gap-2">
-            <Dumbbell className="h-5 w-5 text-primary" />
-            <span className="font-display font-bold text-foreground">Vidativa</span>
+            <img 
+              src="https://www.vidativa.site/assets/logo-vidativa-C-8u4B15.png" 
+              alt="Vidativa Moda Fitness" 
+              className="h-8 w-auto object-contain"
+            />
           </Link>
           <button onClick={toggleTheme} className="p-2 rounded-lg hover:bg-muted">
             {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
