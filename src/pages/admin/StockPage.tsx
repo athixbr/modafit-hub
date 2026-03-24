@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Search, Edit, Trash2, Package, UploadCloud, TrendingUp, Settings, ImageIcon } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Package, UploadCloud, TrendingUp, TrendingDown, BarChart3, Settings, ImageIcon, List, LayoutGrid, Tag, Power, PowerOff, X, History } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { 
@@ -11,8 +11,16 @@ import {
   createCategory, createSize, createColor,
   deleteCategory, deleteSize, deleteColor,
   updateCategory, updateSize, updateColor,
-  uploadFile, createStockEntry
+  uploadFile, createStockEntry, createStockExit, createStockAdjustment, getProductMovements
 } from '@/lib/api';
+
+interface StockMovement {
+  id: string;
+  type: string;
+  quantity: number;
+  notes?: string;
+  createdAt: string;
+}
 
 interface Product {
   id: string;
@@ -79,6 +87,17 @@ export default function StockPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imagePreview, setImagePreview] = useState<string>('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
+  const [showBulkCategoryDialog, setShowBulkCategoryDialog] = useState(false);
+  const [bulkCategoryValue, setBulkCategoryValue] = useState('');
+  const [showStockModal, setShowStockModal] = useState(false);
+  const [stockModalProduct, setStockModalProduct] = useState<Product | null>(null);
+  const [stockTab, setStockTab] = useState<'entry' | 'exit' | 'adjust' | 'history'>('entry');
+  const [stockQty, setStockQty] = useState('');
+  const [stockNotes, setStockNotes] = useState('');
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
+  const [loadingMovements, setLoadingMovements] = useState(false);
   const { toast } = useToast();
   
   // Refs
@@ -132,6 +151,62 @@ export default function StockPage() {
     p.category.toLowerCase().includes(search.toLowerCase())
   );
 
+  const allSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id));
+  const someSelected = selectedIds.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(p => p.id)));
+    }
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Deseja deletar ${selectedIds.size} produto(s) selecionado(s)? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await Promise.all([...selectedIds].map(id => deleteProduct(id)));
+      toast({ title: 'Sucesso', description: `${selectedIds.size} produto(s) deletado(s)`, className: 'bg-green-600 text-white border-0' });
+      setSelectedIds(new Set());
+      loadProducts();
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Erro ao deletar produtos selecionados', variant: 'destructive' });
+    }
+  };
+
+  const handleBulkSetActive = async (active: boolean) => {
+    try {
+      await Promise.all([...selectedIds].map(id => updateProduct(id, { active })));
+      toast({ title: 'Sucesso', description: `${selectedIds.size} produto(s) ${active ? 'ativado(s)' : 'desativado(s)'}`, className: 'bg-green-600 text-white border-0' });
+      setSelectedIds(new Set());
+      loadProducts();
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Erro ao atualizar produtos', variant: 'destructive' });
+    }
+  };
+
+  const handleBulkChangeCategory = async () => {
+    if (!bulkCategoryValue) return;
+    try {
+      await Promise.all([...selectedIds].map(id => updateProduct(id, { category: bulkCategoryValue })));
+      toast({ title: 'Sucesso', description: `Categoria atualizada em ${selectedIds.size} produto(s)`, className: 'bg-green-600 text-white border-0' });
+      setSelectedIds(new Set());
+      setShowBulkCategoryDialog(false);
+      setBulkCategoryValue('');
+      loadProducts();
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Erro ao alterar categoria em massa', variant: 'destructive' });
+    }
+  };
+
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -141,6 +216,51 @@ export default function StockPage() {
         setImagePreview(reader.result as string);
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const openStockModal = async (product: Product) => {
+    setStockModalProduct(product);
+    setStockTab('entry');
+    setStockQty('');
+    setStockNotes('');
+    setStockMovements([]);
+    setShowStockModal(true);
+    setLoadingMovements(true);
+    try {
+      const res = await getProductMovements(product.id);
+      if (res.success) setStockMovements(res.data as StockMovement[]);
+    } catch {/* silent */} finally {
+      setLoadingMovements(false);
+    }
+  };
+
+  const handleStockAction = async () => {
+    if (!stockModalProduct || !stockQty || Number(stockQty) <= 0) {
+      toast({ title: 'Informe uma quantidade válida', variant: 'destructive' });
+      return;
+    }
+    try {
+      let res;
+      if (stockTab === 'entry') {
+        res = await createStockEntry({ items: [{ productId: stockModalProduct.id, quantity: Number(stockQty) }], notes: stockNotes });
+      } else if (stockTab === 'exit') {
+        res = await createStockExit({ productId: stockModalProduct.id, quantity: Number(stockQty), notes: stockNotes });
+      } else {
+        res = await createStockAdjustment({ productId: stockModalProduct.id, newQuantity: Number(stockQty), notes: stockNotes });
+      }
+      if (res.success) {
+        toast({ title: 'Movimentação registrada!', className: 'bg-green-600 text-white border-0' });
+        setStockQty('');
+        setStockNotes('');
+        await loadProducts();
+        const mvRes = await getProductMovements(stockModalProduct.id);
+        if (mvRes.success) setStockMovements(mvRes.data as StockMovement[]);
+      } else {
+        toast({ title: 'Erro', description: res.error, variant: 'destructive' });
+      }
+    } catch (err) {
+      toast({ title: 'Erro ao registrar movimentação', variant: 'destructive' });
     }
   };
 
@@ -358,54 +478,165 @@ export default function StockPage() {
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Buscar por nome, SKU ou categoria..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+      <div className="flex items-center gap-3">
+        <div className="relative max-w-md flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Buscar por nome, SKU ou categoria..." value={search} onChange={e => { setSearch(e.target.value); setSelectedIds(new Set()); }} className="pl-10" />
+        </div>
+        <div className="flex rounded-lg border border-border overflow-hidden">
+          <button onClick={() => setViewMode('table')} className={`px-3 py-2 transition-colors ${viewMode === 'table' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`} title="Visualização em tabela">
+            <List className="h-4 w-4" />
+          </button>
+          <button onClick={() => setViewMode('grid')} className={`px-3 py-2 transition-colors ${viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`} title="Visualização em grade">
+            <LayoutGrid className="h-4 w-4" />
+          </button>
+        </div>
+        {someSelected && (
+          <span className="text-sm text-muted-foreground">{selectedIds.size} de {filtered.length} selecionado(s)</span>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {filtered.map(product => (
-          <div key={product.id} className="bg-card rounded-xl border border-border shadow-card overflow-hidden group hover:shadow-lg transition-shadow">
-            <div className="aspect-square relative overflow-hidden bg-muted">
-              {product.image ? (
-                <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <Package className="h-16 w-16 text-muted-foreground" />
-                </div>
-              )}
-              <div className="absolute top-2 right-2 flex gap-1">
-                <button onClick={() => { setEditingProduct(product); setImagePreview(product.image || ''); setShowForm(true); }} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-card transition-colors">
-                  <Edit className="h-3.5 w-3.5 text-foreground" />
-                </button>
-                <button onClick={() => handleDelete(product.id)} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-destructive hover:text-destructive-foreground transition-colors">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              {product.quantity <= product.minStock && (
-                <div className="absolute bottom-2 left-2 px-2 py-1 rounded-md bg-destructive/90 text-destructive-foreground text-xs font-medium">
-                  Estoque baixo
-                </div>
-              )}
+      {viewMode === 'table' ? (
+        <div className="rounded-xl border border-border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 border-b border-border">
+              <tr>
+                <th className="w-10 py-3 px-4">
+                  <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="rounded border-gray-300 cursor-pointer" />
+                </th>
+                <th className="py-3 px-4 text-left font-medium text-muted-foreground">Produto</th>
+                <th className="py-3 px-4 text-left font-medium text-muted-foreground hidden md:table-cell">SKU</th>
+                <th className="py-3 px-4 text-left font-medium text-muted-foreground hidden lg:table-cell">Categoria</th>
+                <th className="py-3 px-4 text-left font-medium text-muted-foreground hidden xl:table-cell">Tamanhos</th>
+                <th className="py-3 px-4 text-right font-medium text-muted-foreground hidden lg:table-cell">Custo</th>
+                <th className="py-3 px-4 text-right font-medium text-muted-foreground">Venda</th>
+                <th className="py-3 px-4 text-right font-medium text-muted-foreground">Estoque</th>
+                <th className="py-3 px-4 text-center font-medium text-muted-foreground hidden md:table-cell">Status</th>
+                <th className="py-3 px-4 text-center font-medium text-muted-foreground">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((product) => (
+                <tr key={product.id} className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${selectedIds.has(product.id) ? 'bg-primary/5' : ''}`}>
+                  <td className="py-3 px-4">
+                    <input type="checkbox" checked={selectedIds.has(product.id)} onChange={() => toggleSelectOne(product.id)} className="rounded border-gray-300 cursor-pointer" />
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      {product.image ? (
+                        <img src={product.image} alt={product.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
+                          <Package className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground truncate max-w-[220px]">{product.name}</p>
+                        {product.color && <p className="text-xs text-muted-foreground">{product.color}</p>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 font-mono text-xs text-muted-foreground hidden md:table-cell">{product.sku}</td>
+                  <td className="py-3 px-4 text-muted-foreground hidden lg:table-cell">{product.category}</td>
+                  <td className="py-3 px-4 hidden xl:table-cell">
+                    <div className="flex gap-1 flex-wrap">
+                      {(product.size || []).map((s: string) => (
+                        <span key={s} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-xs">{s}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 text-right text-muted-foreground hidden lg:table-cell">R$ {Number(product.costPrice).toFixed(2)}</td>
+                  <td className="py-3 px-4 text-right font-semibold text-primary">R$ {Number(product.price).toFixed(2)}</td>
+                  <td className="py-3 px-4 text-right">
+                    <span className={`font-semibold ${product.quantity <= product.minStock ? 'text-destructive' : 'text-foreground'}`}>{product.quantity}</span>
+                    <span className="text-xs text-muted-foreground ml-1">un.</span>
+                  </td>
+                  <td className="py-3 px-4 text-center hidden md:table-cell">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${product.active ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-muted text-muted-foreground'}`}>
+                      {product.active ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => { setEditingProduct(product); setImagePreview(product.image || ''); setSelectedImage(null); setShowForm(true); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Editar">
+                        <Edit className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                      <button onClick={() => openStockModal(product)} className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="Gerenciar Estoque">
+                        <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                      <button onClick={() => handleDelete(product.id)} className="p-1.5 rounded-lg hover:bg-destructive/10 transition-colors" title="Deletar">
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div className="text-center py-16 text-muted-foreground">
+              <Package className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p>Nenhum produto encontrado</p>
             </div>
-            <div className="p-4">
-              <p className="text-xs text-muted-foreground mb-1">{product.sku} • {product.category}</p>
-              <h3 className="font-semibold text-foreground truncate">{product.name}</h3>
-              <div className="flex items-center justify-between mt-3">
-                <span className="text-lg font-bold text-primary">R$ {product.price.toFixed(2)}</span>
-                <span className="text-sm text-muted-foreground">{product.quantity} un.</span>
-              </div>
-              {product.size && product.size.length > 0 && (
-                <div className="flex gap-1 mt-2 flex-wrap">
-                  {product.size.map((s: string) => (
-                    <span key={s} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-xs">{s}</span>
-                  ))}
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {filtered.map(product => (
+            <div key={product.id} className={`bg-card rounded-xl border shadow-card overflow-hidden group hover:shadow-lg transition-shadow ${selectedIds.has(product.id) ? 'border-primary ring-2 ring-primary/20' : 'border-border'}`}>
+              <div className="aspect-square relative overflow-hidden bg-muted">
+                {product.image ? (
+                  <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Package className="h-16 w-16 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="absolute top-2 left-2">
+                  <input type="checkbox" checked={selectedIds.has(product.id)} onChange={() => toggleSelectOne(product.id)} className="w-4 h-4 rounded cursor-pointer" />
                 </div>
-              )}
+                <div className="absolute top-2 right-2 flex gap-1">
+                  <button onClick={() => openStockModal(product)} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-primary hover:text-primary-foreground transition-colors" title="Gerenciar Estoque">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => { setEditingProduct(product); setImagePreview(product.image || ''); setSelectedImage(null); setShowForm(true); }} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-card transition-colors">
+                    <Edit className="h-3.5 w-3.5 text-foreground" />
+                  </button>
+                  <button onClick={() => handleDelete(product.id)} className="p-1.5 rounded-lg bg-card/80 backdrop-blur-sm hover:bg-destructive hover:text-destructive-foreground transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {product.quantity <= product.minStock && (
+                  <div className="absolute bottom-2 left-2 px-2 py-1 rounded-md bg-destructive/90 text-destructive-foreground text-xs font-medium">
+                    Estoque baixo
+                  </div>
+                )}
+              </div>
+              <div className="p-4">
+                <p className="text-xs text-muted-foreground mb-1">{product.sku} • {product.category}</p>
+                <h3 className="font-semibold text-foreground truncate">{product.name}</h3>
+                <div className="flex items-center justify-between mt-3">
+                  <span className="text-lg font-bold text-primary">R$ {Number(product.price).toFixed(2)}</span>
+                  <span className="text-sm text-muted-foreground">{product.quantity} un.</span>
+                </div>
+                {product.size && product.size.length > 0 && (
+                  <div className="flex gap-1 mt-2 flex-wrap">
+                    {product.size.map((s: string) => (
+                      <span key={s} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-xs">{s}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+          {filtered.length === 0 && (
+            <div className="col-span-full text-center py-16 text-muted-foreground">
+              <Package className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <p>Nenhum produto encontrado</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Product Form Dialog */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
@@ -598,6 +829,152 @@ export default function StockPage() {
                 </div>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stock Management Modal */}
+      <Dialog open={showStockModal} onOpenChange={setShowStockModal}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Estoque — {stockModalProduct?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Tabs */}
+            <div className="flex gap-1 bg-muted rounded-lg p-1">
+              {[{ key: 'entry', label: 'Entrada', icon: TrendingUp }, { key: 'exit', label: 'Saída', icon: TrendingDown }, { key: 'adjust', label: 'Ajuste', icon: BarChart3 }, { key: 'history', label: 'Histórico', icon: History }].map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setStockTab(t.key as typeof stockTab)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    stockTab === t.key ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <t.icon className="h-3.5 w-3.5" /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            {stockTab !== 'history' ? (
+              <div className="space-y-3">
+                <div className="bg-muted/40 rounded-lg px-4 py-3 flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Estoque atual</span>
+                  <span className="text-lg font-bold text-foreground">{stockModalProduct?.quantity ?? 0} un.</span>
+                </div>
+                <div>
+                  <Label className="text-sm mb-1.5 block">
+                    {stockTab === 'adjust' ? 'Nova quantidade total' : 'Quantidade'}
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={stockQty}
+                    onChange={e => setStockQty(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm mb-1.5 block">Observações (opcional)</Label>
+                  <Input
+                    placeholder="Ex: Entrada NF #1234"
+                    value={stockNotes}
+                    onChange={e => setStockNotes(e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => setShowStockModal(false)}>Cancelar</Button>
+                  <Button onClick={handleStockAction} className="gradient-primary text-primary-foreground">
+                    {stockTab === 'entry' ? 'Lançar Entrada' : stockTab === 'exit' ? 'Lançar Saída' : 'Ajustar Estoque'}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto">
+                {loadingMovements ? (
+                  <div className="flex justify-center py-8"><div className="w-6 h-6 rounded-full border-2 border-primary/20 border-t-primary animate-spin" /></div>
+                ) : stockMovements.length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground text-sm">Nenhuma movimentação registrada.</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-background">
+                      <tr className="text-left border-b border-border">
+                        <th className="py-2 pr-3 text-muted-foreground font-medium">Tipo</th>
+                        <th className="py-2 pr-3 text-right text-muted-foreground font-medium">Qtd</th>
+                        <th className="py-2 pr-3 text-muted-foreground font-medium">Observação</th>
+                        <th className="py-2 text-muted-foreground font-medium">Data</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockMovements.map(m => (
+                        <tr key={m.id} className="border-b border-border/40">
+                          <td className="py-2 pr-3">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              m.type === 'entry' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              : m.type === 'exit' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                              : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                            }`}>{m.type === 'entry' ? 'Entrada' : m.type === 'exit' ? 'Saída' : 'Ajuste'}</span>
+                          </td>
+                          <td className="py-2 pr-3 text-right font-semibold">{m.quantity}</td>
+                          <td className="py-2 pr-3 text-muted-foreground max-w-[120px] truncate">{m.notes || '-'}</td>
+                          <td className="py-2 text-muted-foreground">{new Date(m.createdAt).toLocaleDateString('pt-BR')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Barra flutuante de Ações em Massa */}
+      {someSelected && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-card border border-border rounded-2xl shadow-2xl px-5 py-3">
+          <span className="text-sm font-semibold text-foreground whitespace-nowrap">{selectedIds.size} selecionado(s)</span>
+          <div className="w-px h-5 bg-border mx-1" />
+          <Button size="sm" variant="outline" onClick={() => handleBulkSetActive(true)} className="gap-1.5 text-green-600 border-green-200 hover:bg-green-50 dark:hover:bg-green-950/30">
+            <Power className="h-3.5 w-3.5" /> Ativar
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => handleBulkSetActive(false)} className="gap-1.5 text-orange-500 border-orange-200 hover:bg-orange-50 dark:hover:bg-orange-950/30">
+            <PowerOff className="h-3.5 w-3.5" /> Desativar
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowBulkCategoryDialog(true)} className="gap-1.5">
+            <Tag className="h-3.5 w-3.5" /> Categoria
+          </Button>
+          <Button size="sm" variant="destructive" onClick={handleBulkDelete} className="gap-1.5">
+            <Trash2 className="h-3.5 w-3.5" /> Excluir
+          </Button>
+          <button onClick={() => setSelectedIds(new Set())} className="ml-1 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Limpar seleção">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Dialog: Alterar Categoria em Massa */}
+      <Dialog open={showBulkCategoryDialog} onOpenChange={setShowBulkCategoryDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Alterar Categoria em Massa</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-muted-foreground">{selectedIds.size} produto(s) selecionado(s) serão atualizados.</p>
+            <div className="space-y-1">
+              <Label>Nova Categoria</Label>
+              <select value={bulkCategoryValue} onChange={e => setBulkCategoryValue(e.target.value)} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                <option value="">Selecione...</option>
+                {categories.map(cat => (
+                  <option key={cat.id} value={cat.name}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { setShowBulkCategoryDialog(false); setBulkCategoryValue(''); }}>Cancelar</Button>
+              <Button onClick={handleBulkChangeCategory} disabled={!bulkCategoryValue} className="gradient-primary text-primary-foreground">Aplicar</Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

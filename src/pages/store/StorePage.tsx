@@ -31,7 +31,7 @@ export default function StorePage() {
     try {
       const response = await getProducts();
       if (response.success) {
-        setProducts(response.data || []);
+        setProducts((response.data as any[]) || []);
       }
     } catch (error: any) {
       console.error('Erro ao carregar produtos:', error);
@@ -55,10 +55,6 @@ export default function StorePage() {
       size,
       price: parseFloat(product.price || product.salePrice || 0),
       image: product.imageUrl || product.image || '/placeholder.jpg'
-    });
-    toast({
-      title: 'Adicionado ao carrinho',
-      description: `${product.name} - Tamanho ${size}`,
     });
   };
 

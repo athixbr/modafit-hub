@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 
 interface CartItem {
   productId: string;
@@ -12,10 +12,12 @@ interface CartItem {
 
 interface CartContextType {
   cart: CartItem[];
+  lastAdded: CartItem | null;
   addToCart: (item: Omit<CartItem, 'quantity'>) => void;
   removeFromCart: (productId: string, size: string) => void;
   updateQuantity: (productId: string, size: string, quantity: number) => void;
   clearCart: () => void;
+  clearLastAdded: () => void;
   getCartTotal: () => number;
   getCartCount: () => number;
 }
@@ -27,6 +29,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
     const savedCart = localStorage.getItem('cart');
     return savedCart ? JSON.parse(savedCart) : [];
   });
+  const [lastAdded, setLastAdded] = useState<CartItem | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     localStorage.setItem('cart', JSON.stringify(cart));
@@ -36,14 +40,22 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setCart(prev => {
       const existing = prev.find(c => c.productId === item.productId && c.size === item.size);
       if (existing) {
-        return prev.map(c => 
-          c.productId === item.productId && c.size === item.size 
-            ? { ...c, quantity: c.quantity + 1 } 
+        return prev.map(c =>
+          c.productId === item.productId && c.size === item.size
+            ? { ...c, quantity: c.quantity + 1 }
             : c
         );
       }
       return [...prev, { ...item, quantity: 1 }];
     });
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setLastAdded({ ...item, quantity: 1 });
+    timerRef.current = setTimeout(() => setLastAdded(null), 5000);
+  };
+
+  const clearLastAdded = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setLastAdded(null);
   };
 
   const removeFromCart = (productId: string, size: string) => {
@@ -77,10 +89,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
   return (
     <CartContext.Provider value={{
       cart,
+      lastAdded,
       addToCart,
       removeFromCart,
       updateQuantity,
       clearCart,
+      clearLastAdded,
       getCartTotal,
       getCartCount
     }}>

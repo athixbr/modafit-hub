@@ -1,6 +1,6 @@
 // API Client para comunicação com o backend
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3687/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3029/api';
 
 interface ApiResponse<T> {
   success?: boolean;
@@ -40,7 +40,7 @@ async function apiRequest<T>(
     const response = await fetch(url, {
       method: options.method || 'GET',
       headers,
-      body: options.body ? JSON.stringify(options.body) : undefined
+      body: options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : undefined
     });
 
     const data = await response.json();

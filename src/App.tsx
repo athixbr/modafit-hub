@@ -25,6 +25,7 @@ import CheckoutPage from "./pages/store/CheckoutPage";
 import StoreRegisterPage from "./pages/store/StoreRegisterPage";
 import StoreLoginPage from "./pages/store/StoreLoginPage";
 import NotFound from "./pages/NotFound";
+import CartAddedPopup from "./components/CartAddedPopup";
 
 const queryClient = new QueryClient();
 
@@ -38,7 +39,9 @@ function AppRoutes() {
   const { isAuthenticated } = useAuth();
 
   return (
-    <Routes>
+    <>
+      <CartAddedPopup />
+      <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/admin" replace /> : <LoginPage />} />
       <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />
@@ -59,6 +62,7 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to="/loja" replace />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
+    </>
   );
 }
 
