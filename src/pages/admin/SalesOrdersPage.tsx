@@ -85,6 +85,7 @@ export default function OrdersPage() {
   const [selectedProductData, setSelectedProductData] = useState<Product | null>(null);
   const [itemQuantity, setItemQuantity] = useState(1);
   const [itemSize, setItemSize] = useState('');
+  const [scanSku, setScanSku] = useState('');
 
   const { toast } = useToast();
 
@@ -130,7 +131,13 @@ export default function OrdersPage() {
     try {
       const response = await getProducts();
       if (response.success && response.data) {
-        setProducts(response.data);
+        // Ensure numeric fields are numbers (API may return strings)
+        const normalized = response.data.map((p: any) => ({
+          ...p,
+          price: Number(p.price),
+          quantity: Number(p.quantity)
+        }));
+        setProducts(normalized);
       }
     } catch (error) {
       console.error('Erro ao carregar produtos:', error);
@@ -169,6 +176,17 @@ export default function OrdersPage() {
       if (Array.isArray(productSizes) && productSizes.length > 0) {
         setItemSize(productSizes[0]);
       }
+    }
+  };
+
+  const handleSkuLookup = (sku: string) => {
+    if (!sku) return;
+    const found = products.find(p => (p.sku || '').toString() === sku.toString());
+    if (found) {
+      handleProductSelect(found.id);
+      setScanSku('');
+    } else {
+      toast({ title: 'Não encontrado', description: 'Produto com esse SKU não encontrado', variant: 'destructive' });
     }
   };
 

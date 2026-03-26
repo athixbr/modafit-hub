@@ -26,7 +26,7 @@ interface Product {
   id: string;
   name: string;
   description?: string;
-  category: string;
+  category: string | string[];
   size?: string[];
   color?: string;
   price: number;
@@ -110,6 +110,11 @@ export default function StockPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const formatCategory = (c: string | string[] | undefined) => {
+    if (!c) return '';
+    return Array.isArray(c) ? c.join(', ') : c;
+  };
+
   const loadProducts = async () => {
     try {
       setLoading(true);
@@ -148,7 +153,7 @@ export default function StockPage() {
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     p.sku.toLowerCase().includes(search.toLowerCase()) ||
-    p.category.toLowerCase().includes(search.toLowerCase())
+    formatCategory(p.category).toLowerCase().includes(search.toLowerCase())
   );
 
   const allSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id));
@@ -310,10 +315,12 @@ export default function StockPage() {
         }
       });
 
+      const selectedCategories = form.getAll('category') as string[];
+
       const productData = {
         name: form.get('name') as string,
         description: form.get('description') as string,
-        category: form.get('category') as string,
+        category: selectedCategories,
         size: selectedSizes,
         color: form.get('color') as string,
         price: parseFloat(form.get('price') as string),
@@ -507,7 +514,7 @@ export default function StockPage() {
                 <th className="py-3 px-4 text-left font-medium text-muted-foreground">Produto</th>
                 <th className="py-3 px-4 text-left font-medium text-muted-foreground hidden md:table-cell">SKU</th>
                 <th className="py-3 px-4 text-left font-medium text-muted-foreground hidden lg:table-cell">Categoria</th>
-                <th className="py-3 px-4 text-left font-medium text-muted-foreground hidden xl:table-cell">Tamanhos</th>
+                <th className="py-3 px-4 text-left font-medium text-muted-foreground">Tamanhos</th>
                 <th className="py-3 px-4 text-right font-medium text-muted-foreground hidden lg:table-cell">Custo</th>
                 <th className="py-3 px-4 text-right font-medium text-muted-foreground">Venda</th>
                 <th className="py-3 px-4 text-right font-medium text-muted-foreground">Estoque</th>
@@ -537,8 +544,8 @@ export default function StockPage() {
                     </div>
                   </td>
                   <td className="py-3 px-4 font-mono text-xs text-muted-foreground hidden md:table-cell">{product.sku}</td>
-                  <td className="py-3 px-4 text-muted-foreground hidden lg:table-cell">{product.category}</td>
-                  <td className="py-3 px-4 hidden xl:table-cell">
+                  <td className="py-3 px-4 text-muted-foreground hidden lg:table-cell">{formatCategory(product.category)}</td>
+                  <td className="py-3 px-4">
                     <div className="flex gap-1 flex-wrap">
                       {(product.size || []).map((s: string) => (
                         <span key={s} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-xs">{s}</span>
@@ -613,7 +620,7 @@ export default function StockPage() {
                 )}
               </div>
               <div className="p-4">
-                <p className="text-xs text-muted-foreground mb-1">{product.sku} • {product.category}</p>
+                <p className="text-xs text-muted-foreground mb-1">{product.sku} • {formatCategory(product.category)}</p>
                 <h3 className="font-semibold text-foreground truncate">{product.name}</h3>
                 <div className="flex items-center justify-between mt-3">
                   <span className="text-lg font-bold text-primary">R$ {Number(product.price).toFixed(2)}</span>
@@ -682,9 +689,14 @@ export default function StockPage() {
               </div>
               
               <div className="space-y-1">
-                <Label>Categoria *</Label>
-                <select name="category" required defaultValue={editingProduct?.category} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                  <option value="">Selecione...</option>
+                <Label>Categorias *</Label>
+                <select name="category" required multiple defaultValue={
+                  editingProduct?.category
+                    ? Array.isArray(editingProduct.category)
+                      ? editingProduct.category
+                      : [editingProduct.category]
+                    : []
+                } className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" size={4}>
                   {categories.map(cat => (
                     <option key={cat.id} value={cat.name}>{cat.name}</option>
                   ))}
@@ -997,7 +1009,6 @@ function AttributesDialog({ open, onClose, categories, sizes, colors, onReload, 
   const [tab, setTab] = useState<'categories' | 'sizes' | 'colors'>('categories');
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
-  const [newHexCode, setNewHexCode] = useState('#000000');
   const [newOrder, setNewOrder] = useState(0);
 
   const handleAddCategory = async () => {
@@ -1029,10 +1040,11 @@ function AttributesDialog({ open, onClose, categories, sizes, colors, onReload, 
   const handleAddColor = async () => {
     if (!newName.trim()) return;
     try {
-      await createColor({ name: newName, hexCode: newHexCode });
+      // Create color using only the name (no hex selection required)
+      await createColor({ name: newName });
       toast({ title: 'Sucesso', description: 'Cor adicionada', className: 'bg-green-600 text-white border-0' });
       setNewName('');
-      setNewHexCode('#000000');
+      // no hex to reset
       onReload();
     } catch (error) {
       toast({ title: 'Erro', description: error instanceof Error ? error.message : 'Erro ao adicionar', variant: 'destructive' });
@@ -1142,7 +1154,6 @@ function AttributesDialog({ open, onClose, categories, sizes, colors, onReload, 
             <div className="space-y-4">
               <div className="flex gap-2">
                 <Input placeholder="Nome da cor" value={newName} onChange={e => setNewName(e.target.value)} />
-                <Input placeholder="Código hex" type="color" value={newHexCode} onChange={e => setNewHexCode(e.target.value)} className="w-24" />
                 <Button onClick={handleAddColor} className="gap-2"><Plus className="h-4 w-4" /> Adicionar</Button>
               </div>
               <div className="space-y-2">
