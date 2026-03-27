@@ -3,13 +3,13 @@ import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Package, Users, Truck, ShoppingCart, ArrowLeftRight,
-  DollarSign, BarChart3, Store, Wallet, Dumbbell
+  DollarSign, BarChart3, Store, Wallet, Dumbbell, Settings
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import AdminHeader from './AdminHeader';
 import AdminFooter from './AdminFooter';
 
-const menuItems = [
+const adminMenuItems = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/admin' },
   { label: 'Estoque', icon: Package, path: '/admin/estoque' },
   { label: 'Clientes', icon: Users, path: '/admin/clientes' },
@@ -18,6 +18,14 @@ const menuItems = [
   { label: 'Caixa', icon: Wallet, path: '/admin/caixa' },
   { label: 'Financeiro', icon: DollarSign, path: '/admin/financeiro' },
   { label: 'Relatórios', icon: BarChart3, path: '/admin/relatorios' },
+  { label: 'Configurações', icon: Settings, path: '/admin/configuracoes' },
+  { label: 'Loja Virtual', icon: Store, path: '/loja' },
+];
+
+const userMenuItems = [
+  { label: 'Estoque', icon: Package, path: '/admin/estoque' },
+  { label: 'Clientes', icon: Users, path: '/admin/clientes' },
+  { label: 'Pedidos de Venda', icon: ShoppingCart, path: '/admin/pedidos' },
   { label: 'Loja Virtual', icon: Store, path: '/loja' },
 ];
 
@@ -25,6 +33,7 @@ export default function AdminLayout() {
   const { user } = useAuth();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const menuItems = user?.role === 'admin' ? adminMenuItems : userMenuItems;
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">

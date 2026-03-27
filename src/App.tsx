@@ -19,6 +19,7 @@ import SalesOrdersPage from "./pages/admin/SalesOrdersPage";
 import CashRegisterPage from "./pages/admin/CashRegisterPage";
 import FinancialPage from "./pages/admin/FinancialPage";
 import ReportsPage from "./pages/admin/ReportsPage";
+import SettingsUsersPage from "./pages/admin/SettingsUsersPage";
 import StorePage from "./pages/store/StorePage";
 import ProductDetailPage from "./pages/store/ProductDetailPage";
 import CheckoutPage from "./pages/store/CheckoutPage";
@@ -35,6 +36,20 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RoleRoute({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles: Array<'admin' | 'user'>;
+}) {
+  const { user } = useAuth();
+  if (!user || !allowedRoles.includes(user.role)) {
+    return <Navigate to="/admin/estoque" replace />;
+  }
+  return <>{children}</>;
+}
+
 function AppRoutes() {
   const { isAuthenticated } = useAuth();
 
@@ -44,15 +59,16 @@ function AppRoutes() {
       <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/admin" replace /> : <LoginPage />} />
       <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<RoleRoute allowedRoles={["admin"]}><DashboardPage /></RoleRoute>} />
         <Route path="perfil" element={<ProfilePage />} />
-        <Route path="estoque" element={<StockPage />} />
-        <Route path="clientes" element={<CustomersPage />} />
-        <Route path="fornecedores" element={<SuppliersPage />} />
-        <Route path="pedidos" element={<SalesOrdersPage />} />
-        <Route path="caixa" element={<CashRegisterPage />} />
-        <Route path="financeiro" element={<FinancialPage />} />
-        <Route path="relatorios" element={<ReportsPage />} />
+        <Route path="estoque" element={<RoleRoute allowedRoles={["admin", "user"]}><StockPage /></RoleRoute>} />
+        <Route path="clientes" element={<RoleRoute allowedRoles={["admin", "user"]}><CustomersPage /></RoleRoute>} />
+        <Route path="fornecedores" element={<RoleRoute allowedRoles={["admin"]}><SuppliersPage /></RoleRoute>} />
+        <Route path="pedidos" element={<RoleRoute allowedRoles={["admin", "user"]}><SalesOrdersPage /></RoleRoute>} />
+        <Route path="caixa" element={<RoleRoute allowedRoles={["admin"]}><CashRegisterPage /></RoleRoute>} />
+        <Route path="financeiro" element={<RoleRoute allowedRoles={["admin"]}><FinancialPage /></RoleRoute>} />
+        <Route path="relatorios" element={<RoleRoute allowedRoles={["admin"]}><ReportsPage /></RoleRoute>} />
+        <Route path="configuracoes" element={<RoleRoute allowedRoles={["admin"]}><SettingsUsersPage /></RoleRoute>} />
       </Route>
       <Route path="/loja" element={<StorePage />} />
       <Route path="/loja/produto/:id" element={<ProductDetailPage />} />

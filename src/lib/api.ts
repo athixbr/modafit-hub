@@ -1,4 +1,4 @@
-// API Client para comunicação com o backend
+﻿// API Client para comunicação com o backend
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3029/api';
 
@@ -109,6 +109,46 @@ export async function changePassword(newPassword: string, confirmPassword: strin
 export async function logout() {
   return apiRequest('/auth/logout', {
     method: 'POST'
+  });
+}
+
+/**
+ * USUARIOS (Admin)
+ */
+
+export async function getUsers() {
+  return apiRequest('/users');
+}
+
+export async function createUser(data: {
+  name: string;
+  email: string;
+  password: string;
+  role: 'admin' | 'user';
+  active?: boolean;
+}) {
+  return apiRequest('/users', {
+    method: 'POST',
+    body: data,
+  });
+}
+
+export async function updateUser(id: string, data: {
+  name?: string;
+  email?: string;
+  password?: string;
+  role?: 'admin' | 'user';
+  active?: boolean;
+}) {
+  return apiRequest(`/users/${id}`, {
+    method: 'PUT',
+    body: data,
+  });
+}
+
+export async function deleteUser(id: string) {
+  return apiRequest(`/users/${id}`, {
+    method: 'DELETE',
   });
 }
 
@@ -442,9 +482,40 @@ export async function createOrder(data: {
   });
 }
 
-export async function convertOrderToSale(id: string) {
+
+export async function updateOrderItems(id: string, data: {
+  items: Array<{
+    productId: string;
+    productName: string;
+    quantity: number;
+    size?: string;
+    unitPrice: number;
+    total: number;
+  }>;
+  discount?: number;
+  notes?: string;
+}) {
+  return apiRequest(`/orders/${id}/items`, {
+    method: 'PUT',
+    body: data
+  });
+}
+
+export async function convertOrderToSale(id: string, data?: {
+  items?: Array<{
+    productId: string;
+    productName: string;
+    quantity: number;
+    size?: string;
+    unitPrice: number;
+    total: number;
+  }>;
+  discount?: number;
+  notes?: string;
+}) {
   return apiRequest(`/orders/${id}/convert`, {
-    method: 'PUT'
+    method: 'PUT',
+    body: data
   });
 }
 
@@ -746,3 +817,4 @@ export default {
   uploadFile,
   uploadMultipleFiles
 };
+

@@ -322,11 +322,11 @@ export default function StockPage() {
         description: form.get('description') as string,
         category: selectedCategories,
         size: selectedSizes,
-        color: form.get('color') as string,
-        price: parseFloat(form.get('price') as string),
-        costPrice: parseFloat(form.get('costPrice') as string),
-        quantity: parseInt(form.get('quantity') as string),
-        minStock: parseInt(form.get('minStock') as string),
+        color: (form.get('color') as string) || undefined,
+        price: parseFloat(form.get('price') as string) || 0,
+        costPrice: parseFloat(form.get('costPrice') as string) || 0,
+        quantity: parseInt(form.get('quantity') as string) || 0,
+        minStock: parseInt(form.get('minStock') as string) || 0,
         sku: form.get('sku') as string,
         image: imageUrl,
         active: true
@@ -689,8 +689,8 @@ export default function StockPage() {
               </div>
               
               <div className="space-y-1">
-                <Label>Categorias *</Label>
-                <select name="category" required multiple defaultValue={
+                <Label>Categorias</Label>
+                <select name="category" multiple defaultValue={
                   editingProduct?.category
                     ? Array.isArray(editingProduct.category)
                       ? editingProduct.category
@@ -704,8 +704,8 @@ export default function StockPage() {
               </div>
               
               <div className="space-y-1">
-                <Label>Cor *</Label>
-                <select name="color" required defaultValue={editingProduct?.color} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                <Label>Cor</Label>
+                <select name="color" defaultValue={editingProduct?.color} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                   <option value="">Selecione...</option>
                   {colors.map(color => (
                     <option key={color.id} value={color.name}>
@@ -738,18 +738,18 @@ export default function StockPage() {
               </div>
               
               <div className="space-y-1">
-                <Label>Estoque Mínimo *</Label>
-                <Input name="minStock" type="number" required defaultValue={editingProduct?.minStock} />
+                <Label>Estoque Mínimo</Label>
+                <Input name="minStock" type="number" defaultValue={editingProduct?.minStock} />
               </div>
               
               <div className="space-y-1">
-                <Label>Quantidade *</Label>
-                <Input name="quantity" type="number" required defaultValue={editingProduct?.quantity} />
+                <Label>Quantidade</Label>
+                <Input name="quantity" type="number" defaultValue={editingProduct?.quantity} />
               </div>
               
               <div className="space-y-1">
-                <Label>Preço Custo *</Label>
-                <Input name="costPrice" type="number" step="0.01" required defaultValue={editingProduct?.costPrice} />
+                <Label>Preço Custo</Label>
+                <Input name="costPrice" type="number" step="0.01" defaultValue={editingProduct?.costPrice} />
               </div>
               
               <div className="space-y-1">
